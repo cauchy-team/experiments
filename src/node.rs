@@ -5,7 +5,7 @@ use std::{
 
 use actix::prelude::*;
 use consensus::*;
-use futures::future;
+use futures::{future, prelude::*};
 use rand::{seq::SliceRandom, Rng};
 
 pub struct Node {
@@ -13,7 +13,7 @@ pub struct Node {
     hash_rate: u64,
     peers: Vec<Addr<Self>>,
     heartbeat: Duration,
-    mempool: [bool; ODDSKETCH_LEN],
+    mempool: [u8; ODDSKETCH_LEN],
     fault_rate: u8,
     sample_size: usize,
 }
@@ -22,7 +22,7 @@ impl Node {
     pub fn new(hash_rate: u64, heartbeat_ms: u64, fault_rate: u8, sample_size: usize) -> Self {
         let heartbeat = Duration::from_millis(heartbeat_ms);
         let entry = Arc::new(Mutex::new(Entry {
-            oddsketch: [false; 128],
+            oddsketch: [0; ODDSKETCH_LEN],
             mass: 0,
         }));
         Node {
@@ -30,7 +30,7 @@ impl Node {
             hash_rate,
             peers: vec![],
             heartbeat,
-            mempool: [false; ODDSKETCH_LEN],
+            mempool: [0; ODDSKETCH_LEN],
             fault_rate,
             sample_size,
         }
@@ -39,17 +39,17 @@ impl Node {
     fn work(&self) -> u32 {
         let mut rng = rand::thread_rng();
         let record = (0..self.hash_rate)
-            .map(|_| rng.gen_range(0, 16777216))
+            .map(|_| rng.gen_range(0, 2_000_000))
             .max()
             .unwrap();
-        println!("{} {}", record, self.hash_rate);
+        // println!("{} {}", record, self.hash_rate);
 
         record
     }
 
     fn new_tx(&mut self, index: usize) {
         let mut entry_guard = self.entry.lock().unwrap();
-        entry_guard.oddsketch[index] = !entry_guard.oddsketch[index];
+        entry_guard.oddsketch[index / 8] ^= 1 << (index % 8) ;
         entry_guard.mass = self.work();
     }
 
@@ -63,21 +63,25 @@ impl Node {
             .collect();
         let sampling = sample_set
             .into_iter()
-            .map(move |sample| sample.send(EntryRequest).and_then(move |res| Ok(res.ok())));
+            .map(move |sample| sample.send(EntryRequest).map(move |res| res.ok()));
 
         // Filter failures
         let responses = future::join_all(sampling)
-            .map(move |results| results.into_iter().filter_map(move |res| res));
+            .map(move |results| results.into_iter().filter_map(move |res| res).filter_map(move |res| res.ok()));
 
         // Find winner
+        let entry_inner = self.entry.clone();
         let winner = responses.map(move |responses| {
-            let entries: Vec<_> = responses.collect();
+            let mut entries: Vec<_> = responses.collect();
+            entries.push(entry_inner.lock().unwrap().clone());
             let winner = calculate_winner(&entries).unwrap();
             println!(
+                // "winner: {} with mass {} vs entries {:?}",
                 "winner: {} with mass {} and oddsketch {:?}",
                 winner,
                 entries[winner].mass,
                 &entries[winner].oddsketch[..]
+                // entries.iter().map(|entry| entry.mass).collect::<Vec<_>>()
             );
             entries[winner].clone()
         });
@@ -85,8 +89,7 @@ impl Node {
         // Reconcile
         let entry_handle = self.entry.clone();
         let reconcile = winner
-            .map(move |entry| *entry_handle.lock().unwrap() = entry)
-            .map_err(|_| ());
+            .map(move |entry| *entry_handle.lock().unwrap() = entry);
         reconcile.into_actor(self).wait(ctx);
     }
 }
@@ -153,7 +156,7 @@ impl Handler<Transaction> for Node {
 
     fn handle(&mut self, msg: Transaction, _: &mut Context<Self>) {
         let mut rng = rand::thread_rng();
-        let i = rng.gen_range(0, ODDSKETCH_LEN);
+        let i = rng.gen_range(0, ODDSKETCH_LEN * 8);
         self.new_tx(i);
     }
 }

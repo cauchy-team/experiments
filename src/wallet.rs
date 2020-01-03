@@ -12,18 +12,18 @@ pub struct Wallet {
 }
 
 impl Wallet {
-    pub fn new(nodes: Vec<Addr<Node>>, sample_size: usize) -> Self {
+    pub fn new(nodes: Vec<Addr<Node>>, sample_size: usize, broadcast_interval: u64) -> Self {
         Wallet {
             nodes,
             sample_size,
-            broadcast_interval: 5,
+            broadcast_interval,
         }
     }
 }
 
 impl Wallet {
     /// Broadcast a tx to random wallets
-    fn broadcast(&mut self, ctx: &mut Context<Self>) {
+    fn broadcast(&mut self, _: &mut Context<Self>) {
         let mut rng = &mut rand::thread_rng();
         let sample_set: Vec<_> = self
             .nodes
@@ -43,6 +43,6 @@ impl Actor for Wallet {
 
     fn started(&mut self, ctx: &mut Context<Self>) {
         // Send transactions randomly to nodes
-        ctx.run_interval(Duration::from_secs(3), Self::broadcast);
+        ctx.run_interval(Duration::from_millis(self.broadcast_interval), Self::broadcast);
     }
 }

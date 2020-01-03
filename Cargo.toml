@@ -8,6 +8,6 @@ edition = "2018"
 
 [dependencies]
 consensus = { package="cauchy-consensus", git = "https://github.com/cauchy-team/cauchy-consensus" }
-actix = "0.8.3"
+actix = "0.9.0"
 rand = "0.7.2"
-futures = "0.1.25"
+futures = "0.3.1"
