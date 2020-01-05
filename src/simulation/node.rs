@@ -42,14 +42,12 @@ impl Node {
             .map(|_| rng.gen_range(0, 2_000_000))
             .max()
             .unwrap();
-        // println!("{} {}", record, self.hash_rate);
-
         record
     }
 
     fn new_tx(&mut self, index: usize) {
         let mut entry_guard = self.entry.lock().unwrap();
-        entry_guard.oddsketch[index / 8] ^= 1 << (index % 8) ;
+        entry_guard.oddsketch[index / 8] ^= 1 << (index % 8);
         entry_guard.mass = self.work();
     }
 
@@ -66,8 +64,12 @@ impl Node {
             .map(move |sample| sample.send(EntryRequest).map(move |res| res.ok()));
 
         // Filter failures
-        let responses = future::join_all(sampling)
-            .map(move |results| results.into_iter().filter_map(move |res| res).filter_map(move |res| res.ok()));
+        let responses = future::join_all(sampling).map(move |results| {
+            results
+                .into_iter()
+                .filter_map(move |res| res)
+                .filter_map(move |res| res.ok())
+        });
 
         // Find winner
         let entry_inner = self.entry.clone();
@@ -75,21 +77,12 @@ impl Node {
             let mut entries: Vec<_> = responses.collect();
             entries.push(entry_inner.lock().unwrap().clone());
             let winner = calculate_winner(&entries).unwrap();
-            println!(
-                // "winner: {} with mass {} vs entries {:?}",
-                "winner: {} with mass {} and oddsketch {:?}",
-                winner,
-                entries[winner].mass,
-                &entries[winner].oddsketch[..]
-                // entries.iter().map(|entry| entry.mass).collect::<Vec<_>>()
-            );
             entries[winner].clone()
         });
 
         // Reconcile
         let entry_handle = self.entry.clone();
-        let reconcile = winner
-            .map(move |entry| *entry_handle.lock().unwrap() = entry);
+        let reconcile = winner.map(move |entry| *entry_handle.lock().unwrap() = entry);
         reconcile.into_actor(self).wait(ctx);
     }
 }

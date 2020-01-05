@@ -1,6 +1,6 @@
 use actix::prelude::*;
 
-use crate::node::*;
+use super::node::*;
 
 pub struct Tracker {
     nodes: Vec<Addr<Node>>,

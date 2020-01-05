@@ -3,7 +3,7 @@ use std::time::Duration;
 use actix::prelude::*;
 use rand::{seq::SliceRandom, Rng};
 
-use crate::node::*;
+use super::node::*;
 
 pub struct Wallet {
     nodes: Vec<Addr<Node>>,
@@ -43,6 +43,9 @@ impl Actor for Wallet {
 
     fn started(&mut self, ctx: &mut Context<Self>) {
         // Send transactions randomly to nodes
-        ctx.run_interval(Duration::from_millis(self.broadcast_interval), Self::broadcast);
+        ctx.run_interval(
+            Duration::from_millis(self.broadcast_interval),
+            Self::broadcast,
+        );
     }
 }
