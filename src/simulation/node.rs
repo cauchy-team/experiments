@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
     time::Duration,
 };
 
@@ -9,11 +9,10 @@ use futures::{future, prelude::*};
 use rand::{seq::SliceRandom, Rng};
 
 pub struct Node {
-    entry: Arc<Mutex<Entry>>,
+    entry: Arc<RwLock<Entry>>,
     hash_rate: u64,
     peers: Vec<Addr<Self>>,
     heartbeat: Duration,
-    mempool: [u8; ODDSKETCH_LEN],
     fault_rate: u8,
     sample_size: usize,
 }
@@ -21,7 +20,7 @@ pub struct Node {
 impl Node {
     pub fn new(hash_rate: u64, heartbeat_ms: u64, fault_rate: u8, sample_size: usize) -> Self {
         let heartbeat = Duration::from_millis(heartbeat_ms);
-        let entry = Arc::new(Mutex::new(Entry {
+        let entry = Arc::new(RwLock::new(Entry {
             oddsketch: [0; ODDSKETCH_LEN],
             mass: 0,
         }));
@@ -30,7 +29,6 @@ impl Node {
             hash_rate,
             peers: vec![],
             heartbeat,
-            mempool: [0; ODDSKETCH_LEN],
             fault_rate,
             sample_size,
         }
@@ -46,7 +44,7 @@ impl Node {
     }
 
     fn new_tx(&mut self, index: usize) {
-        let mut entry_guard = self.entry.lock().unwrap();
+        let mut entry_guard = self.entry.write().unwrap();
         entry_guard.oddsketch[index / 8] ^= 1 << (index % 8);
         entry_guard.mass = self.work();
     }
@@ -75,14 +73,14 @@ impl Node {
         let entry_inner = self.entry.clone();
         let winner = responses.map(move |responses| {
             let mut entries: Vec<_> = responses.collect();
-            entries.push(entry_inner.lock().unwrap().clone());
-            let winner = calculate_winner(&entries).unwrap();
+            entries.push(entry_inner.read().unwrap().clone());
+            let winner = calculate_winner_par(&entries).unwrap();
             entries[winner].clone()
         });
 
         // Reconcile
         let entry_handle = self.entry.clone();
-        let reconcile = winner.map(move |entry| *entry_handle.lock().unwrap() = entry);
+        let reconcile = winner.map(move |entry| *entry_handle.write().unwrap() = entry);
         reconcile.into_actor(self).wait(ctx);
     }
 }
@@ -107,7 +105,7 @@ impl Handler<EntryRequest> for Node {
     type Result = <EntryRequest as Message>::Result;
     fn handle(&mut self, _: EntryRequest, _: &mut Context<Self>) -> Self::Result {
         // TODO: Random failure
-        Ok(self.entry.lock().unwrap().clone())
+        Ok(self.entry.read().unwrap().clone())
     }
 }
 pub struct NewPeer(Addr<Node>);

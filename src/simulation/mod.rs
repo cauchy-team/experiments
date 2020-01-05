@@ -4,7 +4,8 @@ pub mod wallet;
 
 use actix::prelude::*;
 use consensus::Entry;
-use futures::{future::try_join_all, prelude::*};
+use futures::{future::try_join_all};
+use rayon::prelude::*;
 
 pub use node::*;
 pub use tracker::*;
@@ -27,19 +28,17 @@ impl SystemAddrs {
         let entries = self.get_all_entries().await?;
 
         let n_entries = entries.len();
-        let mut distances = Vec::with_capacity(n_entries * n_entries / 2);
-        for i in 0..entries.len() {
-            for j in 0..i {
-                let dist = entries[i]
-                    .oddsketch
-                    .iter()
-                    .zip(entries[j].oddsketch.iter())
-                    .fold(0, |total, (byte_a, byte_b)| {
-                        total + (byte_a ^ byte_b).count_ones()
-                    });
-                distances.push(dist);
-            }
-        }
+        let distances = (0..n_entries * (n_entries - 1)).into_par_iter().map(|k| {
+            let i = k % n_entries;
+            let j = k / n_entries;
+            entries[i]
+                .oddsketch
+                .iter()
+                .zip(entries[j].oddsketch.iter())
+                .fold(0, |total, (byte_a, byte_b)| {
+                    total + (byte_a ^ byte_b).count_ones()
+                })
+        }).collect();
         Ok(distances)
     }
 }

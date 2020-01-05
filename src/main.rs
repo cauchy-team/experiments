@@ -16,6 +16,7 @@ use tui::backend::TermionBackend;
 use tui::style::{Color, Modifier, Style};
 use tui::widgets::{Axis, Block, Borders, Chart, Dataset, Marker, Widget};
 use tui::Terminal;
+use rayon::prelude::*;
 
 use crate::util::event::{Event, Events};
 
@@ -23,17 +24,19 @@ struct App {
     sys_addr: SystemAddrs,
     density: Vec<(f64, f64)>,
     window: [f64; 2],
-    range: [f64; 2]
+    range: [f64; 2],
+    resolution: u32
 }
 
 impl App {
-    fn new(sys_addr: SystemAddrs, y_range: u32) -> App {
+    fn new(sys_addr: SystemAddrs, x_range: u32, resolution: u32) -> App {
         let density = (0..32).map(move |i: u32| (i as f64, 0.0)).collect();
         App {
             sys_addr,
             density,
-            window: [0.0, y_range as f64],
-            range: [0.0, 1.]
+            window: [0.0, x_range as f64],
+            range: [0.0, 1.],
+            resolution
         }
     }
 
@@ -47,9 +50,10 @@ impl App {
             let bandwidth = Bandwidth::Silverman;
             let kde = Kde::new(sample, Gaussian, bandwidth);
 
-            self.density = (min..max)
+            let resolution = self.resolution;
+            self.density = (0..(max - min) * resolution).into_par_iter()
                 .map(move |i| {
-                    let point = i as f64;
+                    let point = min as f64 + i as f64 / (resolution.clone() as f64);
                     (point, kde.estimate(point))
                 })
                 .collect();
@@ -60,20 +64,27 @@ impl App {
 
 #[actix_rt::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Start nodes
-    let n_nodes: usize = 64;
+    // Network settings
+    let n_nodes: usize = 256;
     let heartbeat_ms = 1_000;
-    let sample_size = 16;
+    let sample_size = 3;
 
+    // Wallet settings
+    let wallet_broadcast_ms = 10;
+    let wallet_fan_size = 32;
+
+    // App settings
+    let resolution = 10;
+    let x_range = 2048;
+    let refresh_rate = 300;
+
+    // Network initialization
     let nodes: Vec<_> = (0..n_nodes)
         .map(|_| {
             Node::new(1, heartbeat_ms, 1, sample_size)
         })
         .collect();
-
-    let wallet_broadcast_interval = 100;
-    let wallet_fan_size = 100;
-    let sys_addrs = start_simulation(nodes, wallet_fan_size, wallet_broadcast_interval);
+    let sys_addrs = start_simulation(nodes, wallet_fan_size, wallet_broadcast_ms);
 
     // Terminal initialization
     let stdout = io::stdout().into_raw_mode()?;
@@ -85,10 +96,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Setup event handlers
     let events = Events::new();
+    let mut app = App::new(sys_addrs, x_range, resolution);
 
-    // App
-    let mut app = App::new(sys_addrs, 512);
-
+    let mut last_refresh = std::time::Instant::now();
     loop {
         terminal.draw(|mut f| {
             let size = f.size();
@@ -117,10 +127,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .style(Style::default().fg(Color::Gray))
                         .labels_style(Style::default().modifier(Modifier::ITALIC))
                         .bounds(app.range)
-                        .labels(&["0", "Max"]),
+                        .labels(&["0", ""]),
                 )
                 .datasets(&[Dataset::default()
-                    .marker(Marker::Dot)
+                    .marker(Marker::Braille)
                     .style(Style::default().fg(Color::Cyan))
                     .data(&app.density)])
                 .render(&mut f, size);
@@ -133,7 +143,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::Tick => {
-                app.update().await;
+                let now = std::time::Instant::now();
+                if now.duration_since(last_refresh).as_millis() > refresh_rate {
+                    app.update().await;
+                    last_refresh = now;
+                }
             }
         }
     }

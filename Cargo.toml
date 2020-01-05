@@ -14,4 +14,9 @@ criterion-stats = "0.3.0"
 rand = "0.7.2"
 futures = "0.3.1"
 termion = "1.5.4"
+# tokio = { version = "0.2.6", features = ["sync"] }
 tui = "0.8.0"
+rayon = "1.3.0"
+
+[profile.release]
+debug = true
