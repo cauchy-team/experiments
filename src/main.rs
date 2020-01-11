@@ -65,9 +65,9 @@ impl App {
 #[actix_rt::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Network settings
-    let n_nodes: usize = 256;
-    let heartbeat_ms = 1_000;
-    let sample_size = 3;
+    let n_nodes: usize = 128;
+    let heartbeat_ms = 100;
+    let sample_size = 32;
 
     // Wallet settings
     let wallet_broadcast_ms = 10;
@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // App settings
     let resolution = 10;
     let x_range = 2048;
-    let refresh_rate = 300;
+    let refresh_rate = 500;
 
     // Network initialization
     let nodes: Vec<_> = (0..n_nodes)
